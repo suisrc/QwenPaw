@@ -126,7 +126,7 @@ class AsMsgHandler:
                     ),
                 )
 
-            elif block_type in ("image", "audio", "video"):
+            elif block_type in ("image", "audio", "video", "file"):
                 source = block.get("source", {})
                 url = source.get("url", "")
                 if source.get("type") == "base64":

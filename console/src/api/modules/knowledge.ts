@@ -18,7 +18,7 @@ export const knowledgeApi = {
   listKnowledgeBases: () =>
     request<{ items: KnowledgeBaseSummary[] }>("/workspace/knowledge"),
 
-  createKnowledgeBase: (payload: { name: string; id?: string }) =>
+  createKnowledgeBase: (payload: { name: string; id?: string; keywords?: string[] }) =>
     request<{ item: KnowledgeBaseSummary }>("/workspace/knowledge", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -53,7 +53,7 @@ export const knowledgeApi = {
 
   updateKnowledgeBase: (
     knowledgeId: string,
-    payload: { name?: string; enabled?: boolean },
+    payload: { name?: string; enabled?: boolean; keywords?: string[] },
   ) =>
     request<{ item: KnowledgeBaseSummary }>(
       `/workspace/knowledge/${encodeURIComponent(knowledgeId)}`,

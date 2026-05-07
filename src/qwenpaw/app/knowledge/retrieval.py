@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from agentscope.message import AudioBlock, ImageBlock, TextBlock, VideoBlock
+from agentscope.message import Msg, AudioBlock, ImageBlock, TextBlock, VideoBlock
 
 from ...agents.schema import FileBlock
 from .assets import asset_kind_for_suffix
@@ -14,12 +14,6 @@ from .embedding import cosine_similarity, embed_texts, has_usable_embedding_mode
 from .soul import load_soul_knowledge_config
 from .storage import load_store
 from .vector_config import DEFAULT_RETRIEVAL_CONFIG, load_knowledge_vector_config
-
-
-_KNOWLEDGE_ASSET_PATTERN = re.compile(
-    r"!\[(?P<alt>[^\]]*)\]\((?P<markdown_url>/api/files/preview/knowledge-assets/[^)\s]+)\)"
-    r"|(?P<plain_url>/api/files/preview/knowledge-assets/[^)\s]+)",
-)
 
 
 def _tokenize(text: str) -> set[str]:
@@ -73,21 +67,7 @@ def _score_chunk(query_tokens: set[str], knowledge: dict, document: dict, chunk:
     return overlap + exact_bonus
 
 
-def _build_asset_block(url: str, alt: str = "") -> dict[str, Any]:
-    suffix = Path(url).suffix.lower()
-    kind = asset_kind_for_suffix(suffix)
-    source = {"type": "url", "url": url}
-    if kind == "image":
-        return ImageBlock(type="image", source=source)
-    if kind == "audio":
-        return AudioBlock(type="audio", source=source)
-    if kind == "video":
-        return VideoBlock(type="video", source=source)
-    filename = alt.strip() or Path(url).name or "file"
-    return FileBlock(type="file", source=source, filename=filename)
-
-
-def build_retrieval_context(workspace_dir: Path, query: str, agent_id: str = "default") -> str | None:
+def build_knowledge_context(workspace_dir: Path, query: str, agent_id: str = "default") -> str | None:
     if not query.strip():
         return None
 
@@ -195,45 +175,26 @@ def build_retrieval_context(workspace_dir: Path, query: str, agent_id: str = "de
         return None
 
     return (
-        "Use the following retrieved knowledge-base context when answering. "
-        "If it conflicts with the user's current request, explain the conflict clearly. "
-        "If the context contains images (such as markdown image links), you must preserve and reference these images in your answer. "
-        "Do not omit or ignore any image references from the context.\n\n"
-        + "\n\n".join(sections)
+"""
+When answering user questions, please strictly follow the following rules:
+1. Answers should **only** be based on the knowledge base context provided below. Do not use external information or make unsubstantiated assumptions.
+2. If the content of the knowledge base conflicts with the user's current request, you must explicitly inform the user of this conflict before providing further answers.
+3. Only if a sentence contains any links (such as Markdown links and links with the prefix "/api/files/preview/knowledge-assets/"), you must fully retain and reference these links in appropriate places in your answers. 
+   Under no circumstances should any part of the links be truncated, modified, or omitted. Ensure the integrity of the links in your response.
+""" + "\n\n".join(sections)
     )
 
 
-def build_retrieval_message_content(
+def build_knowledge_message(
     workspace_dir: Path,
     query: str,
     agent_id: str = "default",
-) -> list[dict[str, Any]] | None:
-    context = build_retrieval_context(workspace_dir, query, agent_id)
+) -> Msg | None:
+    context = build_knowledge_context(workspace_dir, query, agent_id)
     if not context:
         return None
-
-    blocks: list[dict[str, Any]] = []
-    cursor = 0
-
-    for match in _KNOWLEDGE_ASSET_PATTERN.finditer(context):
-        start, end = match.span()
-        if start > cursor:
-            text = context[cursor:start]
-            if text:
-                blocks.append(TextBlock(type="text", text=text))
-
-        url = match.group("markdown_url") or match.group("plain_url") or ""
-        alt = match.group("alt") or ""
-        if url:
-            blocks.append(_build_asset_block(url, alt))
-        cursor = end
-
-    if cursor < len(context):
-        tail = context[cursor:]
-        if tail:
-            blocks.append(TextBlock(type="text", text=tail))
-
-    if not blocks and context:
-        blocks.append(TextBlock(type="text", text=context))
-
-    return blocks
+    return Msg(
+        name="Knowledge",
+        role="system",
+        content=[TextBlock(type="text", text=context)],
+    )

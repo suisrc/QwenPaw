@@ -8,7 +8,7 @@ from .parsing import (
     extract_upload_payload,
 )
 from .embedding import cosine_similarity, embed_texts, has_usable_embedding_model
-from .retrieval import build_retrieval_context, build_retrieval_message_content
+from .retrieval import build_knowledge_context, build_knowledge_message
 from .soul import (
     DEFAULT_SOUL_CONTENT,
     load_soul_knowledge_config,
@@ -25,6 +25,7 @@ from .storage import (
     list_chunks_paginated,
     load_store,
     normalize_knowledge_store,
+    normalize_keywords,
     save_store,
     slugify,
     utc_now,
@@ -51,8 +52,8 @@ __all__ = [
     "build_chunk_summary",
     "build_document_summary",
     "build_knowledge_summary",
-    "build_retrieval_context",
-    "build_retrieval_message_content",
+    "build_knowledge_context",
+    "build_knowledge_message",
     "chunk_text",
     "chunk_text_with_model",
     "cosine_similarity",
@@ -75,6 +76,7 @@ __all__ = [
     "normalize_embedding_model_config",
     "normalize_retrieval_config",
     "normalize_knowledge_store",
+    "normalize_keywords",
     "save_knowledge_vector_config",
     "save_soul_knowledge_config",
     "save_store",

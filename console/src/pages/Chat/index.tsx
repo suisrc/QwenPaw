@@ -31,6 +31,7 @@ import { ApprovalCard } from "../../components/ApprovalCard/ApprovalCard";
 import { commandsApi } from "../../api/modules/commands";
 import { useApprovalContext } from "../../contexts/ApprovalContext";
 import { planApi } from "../../api/modules/plan";
+import { getAgentDisplayName } from "../../utils/agentDisplayName";
 
 interface ApprovalMessageData {
   requestId: string;
@@ -52,6 +53,7 @@ import {
   extractCopyableText,
   buildModelError,
   normalizeContentUrls,
+  normalizeMarkdownImageContent,
   extractUserMessageText,
   extractTextFromMessage,
   setTextareaValue,
@@ -491,7 +493,7 @@ export default function ChatPage() {
     return match?.[1];
   }, [location.pathname]);
   const [showModelPrompt, setShowModelPrompt] = useState(false);
-  const { selectedAgent } = useAgentStore();
+  const { selectedAgent, agents } = useAgentStore();
   const { toolRenderConfig } = usePlugins();
   const [refreshKey, setRefreshKey] = useState(0);
   const runtimeLoadingBridgeRef = useRef<RuntimeLoadingBridgeApi | null>(null);
@@ -501,6 +503,14 @@ export default function ChatPage() {
     Map<string, ApprovalMessageData>
   >(new Map());
   const [planEnabled, setPlanEnabled] = useState(false);
+  const currentAgentInfo = useMemo(
+    () => agents.find((agent) => agent.id === selectedAgent),
+    [agents, selectedAgent],
+  );
+  const welcomeNick = currentAgentInfo
+    ? getAgentDisplayName(currentAgentInfo, t)
+    : t("agent.defaultDisplayName");
+  const welcomeAvatar = currentAgentInfo?.avatar || "/qwenpaw.png";
 
   useEffect(() => {
     let cancelled = false;
@@ -697,11 +707,185 @@ export default function ChatPage() {
   const chatIdRef = useRef(chatId);
   const navigateRef = useRef(navigate);
   const chatRef = useRef<IAgentScopeRuntimeWebUIRef>(null);
+  const chatMessagesAreaRef = useRef<HTMLDivElement>(null);
+  const streamMarkdownBufferRef = useRef<Map<string, string>>(new Map());
+  const streamMessageTypeRef = useRef<string | null>(null);
   const pendingClearHistoryRef = useRef(false);
 
   useMessageHistoryNavigation(chatRef, isChatActive, isComposingRef);
   chatIdRef.current = chatId;
   navigateRef.current = navigate;
+
+  const resetStreamMarkdownBuffer = useCallback(() => {
+    streamMarkdownBufferRef.current.clear();
+    streamMessageTypeRef.current = null;
+  }, []);
+
+  const clearCompletedStreamState = useCallback(() => {
+    streamMarkdownBufferRef.current.clear();
+    streamMessageTypeRef.current = null;
+  }, []);
+
+  const decorateContentBlocks = useCallback(
+    (content: unknown, status: unknown) => {
+      const resolvedStatus =
+        typeof status === "string" ? status : "in_progress";
+
+      if (!Array.isArray(content)) {
+        return content;
+      }
+
+      return content.map((item) => {
+        if (!item || typeof item !== "object") {
+          return item;
+        }
+
+        return {
+          ...(item as Record<string, unknown>),
+          status:
+            (item as Record<string, unknown>).status ?? resolvedStatus,
+        };
+      });
+    },
+    [],
+  );
+
+  const normalizeStreamTextContent = useCallback(
+    (key: string, text: string, status: unknown) => {
+      const previous = streamMarkdownBufferRef.current.get(key) ?? "";
+      const nextText = previous + text;
+      streamMarkdownBufferRef.current.set(key, nextText);
+
+      return decorateContentBlocks(
+        normalizeMarkdownImageContent(nextText),
+        status,
+      );
+    },
+    [decorateContentBlocks],
+  );
+
+  const normalizeStreamPayload = useCallback(
+    (payload: Record<string, unknown>) => {
+      const status = payload.status;
+
+      if (payload.object === "message" && typeof payload.type === "string") {
+        streamMessageTypeRef.current = payload.type;
+      }
+
+      if (
+        payload.object === "content" &&
+        payload.type === "text" &&
+        typeof payload.text === "string"
+      ) {
+        if (streamMessageTypeRef.current !== "message") {
+          return payload;
+        }
+
+        const key =
+          (typeof payload.msg_id === "string" && payload.msg_id) ||
+          (typeof payload.id === "string" && payload.id) ||
+          "stream:text";
+        const normalizedContent = normalizeStreamTextContent(
+          key,
+          payload.text,
+          status,
+        );
+
+        return {
+          object: "message",
+          id: key,
+          role:
+            typeof payload.role === "string" ? payload.role : "assistant",
+          type: "message",
+          status: typeof status === "string" ? status : "in_progress",
+          content: normalizedContent,
+        };
+      }
+
+      if (
+        payload.object === "message" &&
+        Array.isArray(payload.content) &&
+        payload.content.length === 1
+      ) {
+        if (streamMessageTypeRef.current !== "message") {
+          return payload;
+        }
+
+        const [onlyContent] = payload.content as Record<string, unknown>[];
+        if (
+          onlyContent &&
+          typeof onlyContent === "object" &&
+          onlyContent.type === "text" &&
+          typeof onlyContent.text === "string"
+        ) {
+          const key =
+            (typeof payload.id === "string" && payload.id) ||
+            (typeof onlyContent.msg_id === "string" && onlyContent.msg_id) ||
+            "stream:message";
+          const isStreaming =
+            payload.status === "in_progress" || onlyContent.delta === true;
+          const normalizedContent = isStreaming
+            ? normalizeStreamTextContent(key, onlyContent.text, payload.status)
+            : decorateContentBlocks(
+                normalizeMarkdownImageContent(onlyContent.text),
+                payload.status ?? onlyContent.status,
+              );
+
+          if (!isStreaming) {
+            streamMarkdownBufferRef.current.delete(key);
+          }
+
+          const normalizedMessage: Record<string, unknown> = {
+            ...payload,
+            content: normalizedContent,
+          };
+
+          if (normalizedMessage.status === "completed") {
+            clearCompletedStreamState();
+          }
+
+          return normalizedMessage;
+        }
+      }
+
+      if (payload.object === "response" && Array.isArray(payload.output)) {
+        const normalizedResponse: Record<string, unknown> = {
+          ...payload,
+          output: payload.output.map((item: unknown) => {
+            if (!item || typeof item !== "object") return item;
+            const record = item as Record<string, unknown>;
+            if (record.type !== "message" || !Array.isArray(record.content)) {
+              return item;
+            }
+            return {
+              ...record,
+              content: decorateContentBlocks(
+                normalizeMarkdownImageContent(record.content),
+                record.status,
+              ),
+            };
+          }),
+        };
+
+        if (normalizedResponse.status === "completed") {
+          clearCompletedStreamState();
+        }
+
+        return normalizedResponse;
+      }
+
+      if (status === "completed") {
+        clearCompletedStreamState();
+      }
+
+      return payload;
+    },
+    [clearCompletedStreamState, decorateContentBlocks, normalizeStreamTextContent],
+  );
+
+  useEffect(() => {
+    resetStreamMarkdownBuffer();
+  }, [refreshKey, chatId, selectedAgent, resetStreamMarkdownBuffer]);
 
   const scheduleHistoryClear = useCallback(() => {
     queueMicrotask(() => {
@@ -793,6 +977,55 @@ export default function ChatPage() {
       sessionApi.onSessionCreated = null;
     };
   }, []);
+
+  useEffect(() => {
+    const root = chatMessagesAreaRef.current;
+    if (!root) return;
+
+    const applyPreviewImageSize = () => {
+      const rootStyle = getComputedStyle(root);
+      const previewWidth =
+        rootStyle.getPropertyValue("--chat-preview-image-width").trim() ||
+        "clamp(320px, 45vw, 720px)";
+      const previewMaxHeight =
+        rootStyle.getPropertyValue("--chat-preview-image-max-height").trim() ||
+        "640px";
+
+      root.querySelectorAll<HTMLElement>(".qwenpaw-image").forEach((node) => {
+        node.style.width = previewWidth;
+        node.style.maxWidth = "100%";
+        node.style.height = "auto";
+        node.style.maxHeight = previewMaxHeight;
+        node.style.display = "block";
+        node.style.margin = "8px 0";
+
+        const img = node.querySelector<HTMLImageElement>("img");
+        if (img) {
+          img.style.width = "100%";
+          img.style.maxWidth = "100%";
+          img.style.height = "auto";
+          img.style.maxHeight = previewMaxHeight;
+          img.style.objectFit = "contain";
+          img.style.display = "block";
+        }
+      });
+    };
+
+    const scheduleApply = () => {
+      requestAnimationFrame(applyPreviewImageSize);
+    };
+
+    scheduleApply();
+
+    const observer = new MutationObserver(scheduleApply);
+    observer.observe(root, { childList: true, subtree: true });
+    window.addEventListener("resize", scheduleApply);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleApply);
+    };
+  }, [refreshKey]);
 
   // Setup multimodal capabilities tracking via custom hook
 
@@ -901,6 +1134,8 @@ export default function ChatPage() {
           sessionApi.setLastUserMessage(backendChatId, userText);
         }
       }
+
+      resetStreamMarkdownBuffer();
 
       const response = await fetch(getApiUrl("/console/chat"), {
         method: "POST",
@@ -1016,8 +1251,8 @@ export default function ChatPage() {
       },
       welcome: {
         ...i18nConfig.welcome,
-        nick: "QwenPaw",
-        avatar: "/qwenpaw.png",
+        nick: welcomeNick,
+        avatar: welcomeAvatar,
       },
       sender: {
         ...(i18nConfig as any)?.sender,
@@ -1058,14 +1293,18 @@ export default function ChatPage() {
         fetch: customFetch,
         responseParser: (chunk: string) => {
           const payload = JSON.parse(chunk) as Record<string, unknown>;
+          const normalizedPayload = normalizeStreamPayload(payload) as Record<
+            string,
+            unknown
+          >;
 
-          if (payloadRequestsHistoryClear(payload)) {
+          if (payloadRequestsHistoryClear(normalizedPayload)) {
             pendingClearHistoryRef.current = true;
-            if (payloadCompletesResponse(payload)) {
+            if (payloadCompletesResponse(normalizedPayload)) {
               scheduleHistoryClear();
             }
           }
-          return payload as any;
+          return normalizedPayload as any;
         },
         replaceMediaURL: (url: string) => {
           return toDisplayUrl(url);
@@ -1093,6 +1332,7 @@ export default function ChatPage() {
           }
         },
         async reconnect(data: { session_id: string; signal?: AbortSignal }) {
+          resetStreamMarkdownBuffer();
           const headers: Record<string, string> = {
             "Content-Type": "application/json",
             ...buildAuthHeaders(),
@@ -1150,7 +1390,7 @@ export default function ChatPage() {
         flexDirection: "column",
       }}
     >
-      <div className={styles.chatMessagesArea}>
+      <div ref={chatMessagesAreaRef} className={styles.chatMessagesArea}>
         <AgentScopeRuntimeWebUI
           ref={chatRef}
           key={refreshKey}

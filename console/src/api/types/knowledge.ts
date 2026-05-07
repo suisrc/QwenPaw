@@ -5,6 +5,7 @@ export interface KnowledgeBaseSummary {
   slug: string;
   enabled: boolean;
   status: "enabled" | "disabled";
+  keywords: string[];
   document_count: number;
   enabled_document_count: number;
   processing_document_count: number;

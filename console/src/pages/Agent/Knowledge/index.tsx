@@ -12,6 +12,7 @@ import {
   Modal,
   Select,
   Slider,
+  Tag,
   Switch,
   Table,
   Tabs,
@@ -70,6 +71,41 @@ function formatSliderValue(value: number, digits = 2): string {
     return String(value);
   }
   return value.toFixed(digits);
+}
+
+function normalizeKeywords(keywords: string[]): string[] {
+  const nextKeywords: string[] = [];
+  const seen = new Set<string>();
+  for (const keyword of keywords) {
+    const normalized = keyword.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    nextKeywords.push(normalized);
+  }
+  return nextKeywords;
+}
+
+const KEYWORD_TAG_COLORS = [
+  "magenta",
+  "red",
+  "volcano",
+  "orange",
+  "gold",
+  "lime",
+  "green",
+  "cyan",
+  "geekblue"
+] as const;
+
+function getKeywordTagColor(keyword: string, index: number): (typeof KEYWORD_TAG_COLORS)[number] {
+  let hash = 0;
+  for (const character of keyword) {
+    hash = ((hash & 31) + character.charCodeAt(0));
+  }
+  return KEYWORD_TAG_COLORS[Math.abs(hash) % KEYWORD_TAG_COLORS.length];
+  // return KEYWORD_TAG_COLORS[index % KEYWORD_TAG_COLORS.length];
 }
 
 const DEFAULT_VECTOR_CHUNK_CONFIG = {
@@ -142,6 +178,10 @@ export default function KnowledgePage() {
   const [uploadStep, setUploadStep] = useState(0);
   const [uploadConfigExpanded, setUploadConfigExpanded] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [keywordDraft, setKeywordDraft] = useState("");
+  const [editingKeywordIndex, setEditingKeywordIndex] = useState<number | null>(null);
+  const [editingKeywordDraft, setEditingKeywordDraft] = useState("");
+  const [keywordSaving, setKeywordSaving] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<UploadFile[]>([]);
   const [uploadCapabilities, setUploadCapabilities] =
     useState<KnowledgeUploadCapabilities | null>(null);
@@ -282,6 +322,90 @@ export default function KnowledgePage() {
     );
   };
 
+  const saveKnowledgeKeywords = async (
+    knowledgeId: string,
+    keywords: string[],
+  ) => {
+    setKeywordSaving(true);
+    try {
+      const response = await api.updateKnowledgeBase(knowledgeId, {
+        keywords,
+      });
+      replaceKnowledgeItem(response.item);
+      message.success(t("knowledge.keywordSaveSuccess"));
+      return response.item;
+    } catch (error) {
+      message.error((error as Error).message || t("knowledge.keywordSaveFailed"));
+      throw error;
+    } finally {
+      setKeywordSaving(false);
+    }
+  };
+
+  const commitKeywordDraft = async () => {
+    if (!activeKnowledge) {
+      return;
+    }
+    const nextKeyword = keywordDraft.trim();
+    if (!nextKeyword) {
+      return;
+    }
+    const nextKeywords = normalizeKeywords([
+      ...(activeKnowledge.keywords || []),
+      nextKeyword,
+    ]);
+    if (nextKeywords.length === (activeKnowledge.keywords || []).length) {
+      setKeywordDraft("");
+      return;
+    }
+    await saveKnowledgeKeywords(activeKnowledge.id, nextKeywords);
+    setKeywordDraft("");
+  };
+
+  const commitEditingKeyword = async () => {
+    if (!activeKnowledge || editingKeywordIndex === null) {
+      return;
+    }
+
+    const currentKeywords = activeKnowledge.keywords || [];
+    const nextValue = editingKeywordDraft.trim();
+
+    if (!nextValue) {
+      const nextKeywords = currentKeywords.filter((_, index) => index !== editingKeywordIndex);
+      if (nextKeywords.length !== currentKeywords.length) {
+        await saveKnowledgeKeywords(activeKnowledge.id, nextKeywords);
+      }
+      setEditingKeywordIndex(null);
+      setEditingKeywordDraft("");
+      return;
+    }
+
+    const nextKeywords = normalizeKeywords(
+      currentKeywords.map((keyword, index) =>
+        index === editingKeywordIndex ? nextValue : keyword,
+      ),
+    );
+    await saveKnowledgeKeywords(activeKnowledge.id, nextKeywords);
+    setEditingKeywordIndex(null);
+    setEditingKeywordDraft("");
+  };
+
+  const beginEditKeyword = (keyword: string, index: number) => {
+    setEditingKeywordIndex(index);
+    setEditingKeywordDraft(keyword);
+    setKeywordDraft("");
+  };
+
+  const handleRemoveKeyword = async (keyword: string) => {
+    if (!activeKnowledge) {
+      return;
+    }
+    const nextKeywords = (activeKnowledge.keywords || []).filter(
+      (item) => item !== keyword,
+    );
+    await saveKnowledgeKeywords(activeKnowledge.id, nextKeywords);
+  };
+
   const appendKnowledgeItem = (nextItem: KnowledgeBaseSummary) => {
     setKnowledgeItems((current) => [...current, nextItem]);
   };
@@ -335,6 +459,9 @@ export default function KnowledgePage() {
     options?: { openDrawer?: boolean; syncSummary?: boolean },
   ) => {
     setDetailLoading(true);
+    setKeywordDraft("");
+    setEditingKeywordIndex(null);
+    setEditingKeywordDraft("");
     try {
       const response = await api.getKnowledgeBase(knowledgeId);
       setActiveKnowledge(response.item);
@@ -543,6 +670,9 @@ export default function KnowledgePage() {
             setDrawerOpen(false);
             setActiveKnowledge(null);
             setDocuments([]);
+            setKeywordDraft("");
+            setEditingKeywordIndex(null);
+            setEditingKeywordDraft("");
           }
           setKnowledgeItems((current) => current.filter((currentItem) => currentItem.id !== item.id));
         } catch (error) {
@@ -832,6 +962,23 @@ export default function KnowledgePage() {
       key: "id",
       width: 260,
       render: (value: string) => <span className={styles.monoText}>{value}</span>,
+    },
+    {
+      title: t("knowledge.keywords"),
+      key: "keywords",
+      ellipsis: true,
+      minWidth: 100,
+      render: (_: unknown, item: KnowledgeBaseSummary) => {
+        const value = (item.keywords || []).join(", ");
+        if (!value) {
+          return <span className={styles.placeholderText}>-</span>;
+        }
+        return (
+          <Tooltip title={value}>
+            <span className={styles.keywordPreview}>{value}</span>
+          </Tooltip>
+        );
+      },
     },
     {
       title: t("knowledge.documentCount"),
@@ -1478,15 +1625,80 @@ export default function KnowledgePage() {
       <Drawer
         width={980}
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false);
+          setKeywordDraft("");
+          setEditingKeywordIndex(null);
+          setEditingKeywordDraft("");
+        }}
         title={activeKnowledge ? `${t("knowledge.detailTitle")} · ${activeKnowledge.name}` : t("knowledge.detailTitle")}
       >
         <div className={styles.drawerContent}>
           {activeKnowledge ? (
             <div className={styles.drawerHeaderMeta}>
-              <span>{t("knowledge.id")}: <span className={styles.monoText}>{activeKnowledge.id}</span></span>
-              <span>{t("knowledge.slug")}: {activeKnowledge.slug}</span>
-              <span>{t("knowledge.updatedAt")}: {formatDate(activeKnowledge.updated_at)}</span>
+              <div className={styles.metaRow}>
+                <span>{t("knowledge.id")}: <span className={styles.monoText}>{activeKnowledge.id}</span></span>
+                <span>{t("knowledge.slug")}: {activeKnowledge.slug}</span>
+                <span>{t("knowledge.updatedAt")}: {formatDate(activeKnowledge.updated_at)}</span>
+              </div>
+              <div className={styles.keywordRow}>
+                <span className={styles.keywordLabel}>{t("knowledge.keywords")}</span>
+                <div className={styles.keywordTagGroup}>
+                  {(activeKnowledge.keywords || []).length > 0 ? (
+                    (activeKnowledge.keywords || []).map((keyword, index) => {
+                      const isEditing = editingKeywordIndex === index;
+                      if (isEditing) {
+                        return (
+                          <Input
+                            key={`editing-${index}`}
+                            className={styles.keywordInput}
+                            value={editingKeywordDraft}
+                            autoFocus
+                            disabled={keywordSaving}
+                            onChange={(event) => setEditingKeywordDraft(event.target.value)}
+                            onBlur={() => {
+                              void commitEditingKeyword();
+                            }}
+                            onPressEnter={() => {
+                              void commitEditingKeyword();
+                            }}
+                          />
+                        );
+                      }
+
+                      return (
+                        <Tag
+                          key={keyword}
+                          color={getKeywordTagColor(keyword, index)}
+                          closable
+                          onDoubleClick={() => beginEditKeyword(keyword, index)}
+                          onClose={(event) => {
+                            event.preventDefault();
+                            void handleRemoveKeyword(keyword);
+                          }}
+                        >
+                          {keyword}
+                        </Tag>
+                      );
+                    })
+                  ) : (
+                    <span className={styles.placeholderText}>-</span>
+                  )}
+                  <Input
+                    className={styles.keywordInput}
+                    value={keywordDraft}
+                    placeholder={t("knowledge.keywordNewPlaceholder")}
+                    disabled={keywordSaving}
+                    onChange={(event) => setKeywordDraft(event.target.value)}
+                    onBlur={() => {
+                      void commitKeywordDraft();
+                    }}
+                    onPressEnter={() => {
+                      void commitKeywordDraft();
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           ) : null}
 

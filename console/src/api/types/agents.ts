@@ -7,6 +7,7 @@ export interface AgentSummary {
   id: string;
   name: string;
   description: string;
+  avatar?: string;
   workspace_dir: string;
   enabled: boolean;
   active_model?: ModelSlotConfig | null;
@@ -25,6 +26,7 @@ export interface AgentProfileConfig {
   id: string;
   name: string;
   description?: string;
+  avatar?: string;
   workspace_dir?: string;
   approval_level?: string;
   active_model?: ModelSlotConfig | null;
@@ -42,6 +44,7 @@ export interface CreateAgentRequest {
   id?: string;
   name: string;
   description?: string;
+  avatar?: string;
   workspace_dir?: string;
   language?: string;
   skill_names?: string[];
@@ -51,6 +54,11 @@ export interface CreateAgentRequest {
 export interface AgentProfileRef {
   id: string;
   workspace_dir: string;
+}
+
+export interface AgentAvatarUploadResponse {
+  success: boolean;
+  avatar: string;
 }
 
 export interface AgentKnowledgeBaseListResponse {

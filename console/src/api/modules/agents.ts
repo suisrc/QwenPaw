@@ -1,9 +1,12 @@
 import { request } from "../request";
+import { getApiUrl } from "../config";
+import { buildAuthHeaders } from "../authHeaders";
 import type {
   AgentListResponse,
   AgentProfileConfig,
   CreateAgentRequest,
   AgentProfileRef,
+  AgentAvatarUploadResponse,
   ReorderAgentsResponse,
   AgentKnowledgeBaseListResponse,
   AgentKnowledgeConfigResponse,
@@ -51,6 +54,31 @@ export const agentsApi = {
       method: "PUT",
       body: JSON.stringify(agent),
     }),
+
+  uploadAgentAvatar: async (
+    agentId: string,
+    file: File,
+  ): Promise<AgentAvatarUploadResponse> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(getApiUrl(`/agents/${agentId}/avatar`), {
+      method: "POST",
+      headers: buildAuthHeaders(),
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      throw new Error(
+        `Avatar upload failed: ${response.status} ${response.statusText}${
+          text ? ` - ${text}` : ""
+        }`,
+      );
+    }
+
+    return response.json();
+  },
 
   // Delete agent
   deleteAgent: (agentId: string) =>

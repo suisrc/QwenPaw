@@ -382,7 +382,7 @@ class KnowledgeBackendTestCase(unittest.TestCase):
         original_embed_texts = retrieval.embed_texts
         retrieval.embed_texts = lambda _config, _texts: [[1.0, 0.0]]
         try:
-            context = retrieval.build_retrieval_context(self.temp_workspace, "How do refunds work?")
+            context = retrieval.build_knowledge_context(self.temp_workspace, "How do refunds work?")
         finally:
             retrieval.embed_texts = original_embed_texts
 

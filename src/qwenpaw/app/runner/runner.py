@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Coroutine
 
 import frontmatter as fm
-from agentscope.message import Msg
+from agentscope.message import Msg, TextBlock
 from agentscope_runtime.engine.runner import Runner
 from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
 from agentscope_runtime.engine.schemas.exception import (
@@ -28,7 +28,7 @@ from .mission_dispatch import (
     maybe_handle_mission_command,
     detect_active_mission_phase,
 )
-from ..knowledge_service import build_retrieval_message_content
+from ..knowledge_service import build_knowledge_message
 from .session import SafeJSONSession
 from .utils import build_env_context
 from ..channels.schema import DEFAULT_CHANNEL
@@ -608,18 +608,14 @@ class AgentRunner(Runner):
                     yield skill_response, True
                     return
 
-            retrieval_content = build_retrieval_message_content(
+            knowledge_message = build_knowledge_message(
                 Path(_ws),
                 query or "",
                 self.agent_id,
             )
-            if retrieval_content:
+            if knowledge_message:
                 msgs = [
-                    Msg(
-                        name="Knowledge Base",
-                        role="system",
-                        content=retrieval_content,
-                    ),
+                    knowledge_message,
                     *msgs,
                 ]
 

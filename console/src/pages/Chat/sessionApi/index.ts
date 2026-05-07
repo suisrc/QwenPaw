@@ -9,7 +9,10 @@ import api, {
   type ChatStatus,
   type Message,
 } from "../../../api";
-import { toDisplayUrl } from "../utils";
+import {
+  toDisplayUrl,
+  normalizeMarkdownImageContent,
+} from "../utils";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -140,9 +143,13 @@ function contentToRequestParts(
   return parts;
 }
 function normalizeOutputMessageContent(content: unknown): unknown {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return content;
-  return (content as ContentItem[]).map(resolveContentItemUrl);
+  const normalized = normalizeMarkdownImageContent(content);
+  if (!Array.isArray(normalized)) return normalized;
+  return normalized.map((item) =>
+    typeof item === "object" && item !== null
+      ? resolveContentItemUrl(item as ContentItem)
+      : item,
+  );
 }
 
 /**

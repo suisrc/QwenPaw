@@ -32,6 +32,7 @@ export default function AgentsPage() {
     form.resetFields();
     form.setFieldsValue({
       workspace_dir: "",
+      avatar: "/qwenpaw.png",
       active_model_provider: undefined,
       active_model_model: undefined,
     });
@@ -51,6 +52,7 @@ export default function AgentsPage() {
       setEditingAgent(agent);
       form.setFieldsValue({
         ...config,
+        avatar: config.avatar || "/qwenpaw.png",
         active_model_provider: config.active_model?.provider_id || undefined,
         active_model_model: config.active_model?.model || undefined,
       });
@@ -109,7 +111,11 @@ export default function AgentsPage() {
           : null;
 
       const { active_model_provider, active_model_model, ...rest } = values;
-      const payload = { ...rest, workspace_dir, active_model };
+      const avatar =
+        editingAgent && typeof rest.avatar === "string" && rest.avatar.trim()
+          ? rest.avatar.trim()
+          : "/qwenpaw.png";
+      const payload = { ...rest, avatar, workspace_dir, active_model };
 
       if (editingAgent) {
         const previousInstalledSkills = installedSkillsRef.current;

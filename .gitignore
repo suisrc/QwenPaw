@@ -112,6 +112,7 @@ src/.hypothesis/
 # Worktrees
 .worktrees/
 
+.dev-skills/
 .qwenpaw/
 .qwenpaw.secret/
 readme.local.md

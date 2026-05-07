@@ -8,6 +8,13 @@ export type CopyableContent = {
   refusal?: string;
 };
 
+export type MarkdownContentBlock = {
+  type: string;
+  text?: string;
+  image_url?: string;
+  [key: string]: unknown;
+};
+
 export type CopyableMessage = {
   role?: string;
   content?: string | CopyableContent[];
@@ -182,6 +189,74 @@ export function toDisplayUrl(url: string | undefined): string {
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   if (url.startsWith("file://")) url = url.replace("file://", "");
   return chatApi.filePreviewUrl(url.startsWith("/") ? url : `/${url}`);
+}
+
+/** Show markdown images as separate content blocks */
+const MARKDOWN_IMAGE_RE = /!?\[([^\]]*)\]\((\/api\/files\/preview\/[^)\s]+)\)/g;
+
+function splitMarkdownImageText(text: string): MarkdownContentBlock[] {
+  if (!text) {
+    return [{ type: "text", text: "" }];
+  }
+
+  const parts: MarkdownContentBlock[] = [];
+  let lastIndex = 0;
+  let matched = false;
+
+  MARKDOWN_IMAGE_RE.lastIndex = 0;
+  for (const match of text.matchAll(MARKDOWN_IMAGE_RE)) {
+    matched = true;
+    const start = match.index ?? 0;
+    if (start > lastIndex) {
+      parts.push({ type: "text", text: text.slice(lastIndex, start) });
+    }
+
+    const url = match[2] || "";
+    const alt = match[1] || "";
+    parts.push({
+      type: "image",
+      image_url: toDisplayUrl(url),
+      alt,
+    });
+    lastIndex = start + match[0].length;
+  }
+
+  if (!matched) {
+    return [{ type: "text", text }];
+  }
+
+  if (lastIndex < text.length) {
+    parts.push({ type: "text", text: text.slice(lastIndex) });
+  }
+
+  return parts.length ? parts : [{ type: "text", text }];
+}
+
+export function normalizeMarkdownImageContent(content: unknown): unknown {
+  if (typeof content === "string") {
+    return splitMarkdownImageText(content);
+  }
+
+  if (!Array.isArray(content)) {
+    return content;
+  }
+
+  return content.flatMap((part) => {
+    if (typeof part === "string") {
+      return splitMarkdownImageText(part);
+    }
+
+    if (!part || typeof part !== "object") {
+      return [part];
+    }
+
+    const block = part as Record<string, unknown>;
+    if (block.type === "text" && typeof block.text === "string") {
+      return splitMarkdownImageText(block.text);
+    }
+
+    return [block];
+  });
 }
 
 // ---------------------------------------------------------------------------

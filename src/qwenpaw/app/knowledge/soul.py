@@ -18,6 +18,8 @@ knowledge_base: []
 _This file defines who you are. Evolve it carefully._
 """
 
+SOUL_YAML_WIDTH = 4096
+
 
 def soul_file_path(workspace_dir: Path) -> Path:
     return workspace_dir / "SOUL.md"
@@ -42,9 +44,9 @@ def normalize_knowledge_reference(item: dict[str, Any]) -> dict[str, Any]:
         "id": knowledge_id,
         "priority": max(1, int(item.get("priority") or 1)),
         "trigger": trigger,
-        "retrieval_top_k": min(max(1, int(item.get("retrieval_top_k") or 3)), 20),
-        "usage_rule": str(item.get("usage_rule") or "Use this knowledge base when it is relevant.").strip(),
         "keywords": [str(keyword).strip() for keyword in (item.get("keywords") or []) if str(keyword).strip()],
+        "retrieval_top_k": min(max(1, int(item.get("retrieval_top_k") or 3)), 20),
+        "usage_rule": str(item.get("usage_rule") or "Only use the knowledge base as a backup answer when the skill cannot handle or respond.").strip(),
     }
 
 
@@ -66,7 +68,10 @@ def save_soul_knowledge_config(workspace_dir: Path, items: list[dict[str, Any]])
     normalized_items = [normalize_knowledge_reference(item) for item in items]
     post.metadata["knowledge_base"] = normalized_items
     path = soul_file_path(workspace_dir)
-    path.write_text(fm.dumps(post), encoding="utf-8")
+    path.write_text(
+        fm.dumps(post, width=SOUL_YAML_WIDTH, sort_keys=False),
+        encoding="utf-8",
+    )
     return {
         "items": normalized_items,
         "soul_path": str(path),

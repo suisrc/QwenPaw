@@ -5,9 +5,11 @@ Provides RESTful API for managing multiple agent instances.
 """
 
 import json
+import asyncio
 import logging
+import shutil
 from pathlib import Path
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, File, HTTPException, Query, Request, UploadFile
 from fastapi import Path as PathParam
 from pydantic import BaseModel, field_validator
 
@@ -34,12 +36,15 @@ from ..knowledge import (
     build_knowledge_summary,
     load_soul_knowledge_config,
     load_store,
+    normalize_keywords,
     save_soul_knowledge_config,
 )
 from ..multi_agent_manager import MultiAgentManager
 from ...constant import WORKING_DIR
 
 logger = logging.getLogger(__name__)
+
+PUBLIC_ASSETS_DIR = WORKING_DIR / "public_assets"
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -50,6 +55,7 @@ class AgentSummary(BaseModel):
     id: str
     name: str
     description: str
+    avatar: str = "/qwenpaw.png"
     workspace_dir: str
     enabled: bool
     active_model: ModelSlotConfig | None = None
@@ -96,6 +102,7 @@ class CreateAgentRequest(BaseModel):
     id: str | None = None
     name: str
     description: str = ""
+    avatar: str = "/qwenpaw.png"
     workspace_dir: str | None = None
     language: str | None = None
     skill_names: list[str] | None = None
@@ -122,6 +129,43 @@ class CreateAgentRequest(BaseModel):
             stripped = value.strip()
             return stripped if stripped else None
         return value
+
+
+def _resolve_avatar_extension(file: UploadFile) -> str:
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".jpeg":
+        suffix = ".jpg"
+    if suffix in (".png", ".jpg"):
+        return suffix
+
+    content_type = (file.content_type or "").lower()
+    if content_type == "image/png":
+        return ".png"
+    if content_type in ("image/jpeg", "image/jpg"):
+        return ".jpg"
+
+    raise HTTPException(
+        status_code=400,
+        detail="Avatar upload only supports PNG and JPG images",
+    )
+
+
+def _save_agent_avatar(agent_id: str, file: UploadFile) -> str:
+    avatar_ext = _resolve_avatar_extension(file)
+    avatar_dir = PUBLIC_ASSETS_DIR / agent_id
+    avatar_dir.mkdir(parents=True, exist_ok=True)
+
+    for existing in avatar_dir.glob("avatar.*"):
+        if existing.is_file():
+            existing.unlink()
+
+    avatar_path = avatar_dir / f"avatar{avatar_ext}"
+
+    with avatar_path.open("wb") as target:
+        shutil.copyfileobj(file.file, target)
+
+    return f"/api/files/preview/public-assets/{agent_id}/avatar{avatar_ext}"
 
 
 def _get_multi_agent_manager(request: Request) -> MultiAgentManager:
@@ -240,6 +284,7 @@ async def list_agents() -> AgentListResponse:
                     id=agent_id,
                     name=agent_config.name,
                     description=description,
+                    avatar=agent_config.avatar,
                     workspace_dir=agent_ref.workspace_dir,
                     enabled=getattr(agent_ref, "enabled", True),
                     active_model=active_model,
@@ -347,17 +392,23 @@ async def update_agent_knowledge_base(
     workspace_dir = _get_agent_workspace_dir(agentId)
     existing = load_soul_knowledge_config(workspace_dir)
     existing_by_id = {item["id"]: item for item in existing["items"]}
+    store = load_store(workspace_dir)
+    knowledge_by_id = {
+        item["id"]: item
+        for item in store.get("knowledge_bases", [])
+    }
     next_items = []
     for index, knowledge_id in enumerate(payload.knowledge_ids, start=1):
         item = existing_by_id.get(knowledge_id)
         if item is None:
+            keywords = normalize_keywords(knowledge_by_id.get(knowledge_id, {}).get("keywords") or [])
             item = {
                 "id": knowledge_id,
                 "priority": index,
-                "trigger": "always",
+                "trigger": "keyword" if keywords else "always",
+                "keywords": keywords,
                 "retrieval_top_k": 3,
-                "usage_rule": "Use this knowledge base when it is relevant.",
-                "keywords": [],
+                "usage_rule": "Only use the knowledge base as a backup answer when the skill cannot handle or respond.",
             }
         else:
             item = {**item, "priority": index}
@@ -448,6 +499,7 @@ async def create_agent(
         id=new_id,
         name=request.name,
         description=request.description,
+        avatar=request.avatar,
         workspace_dir=str(workspace_dir),
         language=language,
         channels=ChannelConfig(),
@@ -513,6 +565,33 @@ async def update_agent(
     schedule_agent_reload(request, agentId)
 
     return agent_config
+
+
+@router.post(
+    "/{agentId}/avatar",
+    summary="Upload agent avatar",
+    description="Upload and persist an agent avatar image under public_assets.",
+)
+async def upload_agent_avatar(
+    agentId: str = PathParam(...),
+    request: Request = None,
+    file: UploadFile = File(...),
+) -> dict:
+    config = load_config()
+
+    if agentId not in config.agents.profiles:
+      raise HTTPException(
+            status_code=404,
+            detail=f"Agent '{agentId}' not found",
+        )
+
+    avatar_url = await asyncio.to_thread(_save_agent_avatar, agentId, file)
+
+    agent_config = load_agent_config(agentId)
+    agent_config.avatar = avatar_url
+    save_agent_config(agentId, agent_config)
+
+    return {"success": True, "avatar": avatar_url}
 
 
 @router.delete(

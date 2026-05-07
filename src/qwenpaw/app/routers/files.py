@@ -37,6 +37,12 @@ async def preview_file(
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Not found")
         return FileResponse(path, filename=path.name)
+    # normalized starts with public-assets/, resolve it under WORKING_DIR/public_assets for backward compatibility.
+    if normalized.startswith("public-assets/"):
+        path = WORKING_DIR / "public_assets" / normalized[len("public-assets/") :]
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(path, filename=path.name)
 
     # Normalize /C:/... to C:/... on Windows.
     if (

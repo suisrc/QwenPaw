@@ -51,6 +51,21 @@ def default_store() -> dict[str, Any]:
     return {"knowledge_bases": []}
 
 
+def normalize_keywords(raw_keywords: Any) -> list[str]:
+    if not isinstance(raw_keywords, list):
+        return []
+
+    keywords: list[str] = []
+    seen: set[str] = set()
+    for raw_keyword in raw_keywords:
+        keyword = str(raw_keyword or "").strip()
+        if not keyword or keyword in seen:
+            continue
+        seen.add(keyword)
+        keywords.append(keyword)
+    return keywords
+
+
 def _read_json(path: Path, default: Any) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -126,6 +141,7 @@ def _normalize_knowledge(raw_item: dict[str, Any]) -> dict[str, Any]:
         "enabled": bool(raw_item.get("enabled", True)),
         "created_at": created_at,
         "updated_at": updated_at,
+        "keywords": normalize_keywords(raw_item.get("keywords") or []),
         "documents": [_normalize_document(doc) for doc in (raw_item.get("documents") or []) if isinstance(doc, dict)],
     }
 
@@ -198,6 +214,7 @@ def save_store(workspace_dir: Path, store: dict[str, Any]) -> None:
             "enabled": knowledge["enabled"],
             "created_at": knowledge["created_at"],
             "updated_at": knowledge["updated_at"],
+            "keywords": knowledge.get("keywords") or [],
         })
 
         _write_json(knowledge_entry_meta_path(knowledge_id), summary_items[-1])
@@ -325,6 +342,7 @@ def build_knowledge_summary(knowledge: dict[str, Any], index: int) -> dict[str, 
         "processing_document_count": processing_docs,
         "created_at": knowledge["created_at"],
         "updated_at": knowledge["updated_at"],
+        "keywords": knowledge.get("keywords") or [],
     }
 
 

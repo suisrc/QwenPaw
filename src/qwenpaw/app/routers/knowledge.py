@@ -32,6 +32,7 @@ from ..knowledge import (
     load_store,
     normalize_chunk_config,
     normalize_retrieval_config,
+    normalize_keywords,
     save_knowledge_vector_config,
     save_soul_knowledge_config,
     save_store,
@@ -140,11 +141,13 @@ class DocumentUpdateRequest(BaseModel):
 class KnowledgeBaseCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
     id: str | None = Field(default=None, max_length=32)
+    keywords: list[str] = Field(default_factory=list)
 
 
 class KnowledgeBaseUpdateRequest(BaseModel):
     name: str | None = None
     enabled: bool | None = None
+    keywords: list[str] | None = None
 
 
 class KnowledgeReferenceItem(BaseModel):
@@ -198,6 +201,7 @@ async def create_knowledge_base(payload: KnowledgeBaseCreateRequest, request: Re
         "enabled": True,
         "created_at": utc_now(),
         "updated_at": utc_now(),
+        "keywords": normalize_keywords(payload.keywords),
         "documents": [],
     }
     store["knowledge_bases"].append(knowledge)
@@ -272,6 +276,9 @@ async def update_knowledge_base(knowledge_id: str, payload: KnowledgeBaseUpdateR
 
     if payload.enabled is not None:
         knowledge["enabled"] = payload.enabled
+
+    if payload.keywords is not None:
+        knowledge["keywords"] = normalize_keywords(payload.keywords)
 
     knowledge["updated_at"] = utc_now()
     save_store(workspace.workspace_dir, store)

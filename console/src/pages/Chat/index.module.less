@@ -30,6 +30,33 @@
   width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
+  --chat-preview-image-width: clamp(320px, 45vw, 720px);
+  --chat-preview-image-max-height: min(60vh, 640px);
+
+  :global {
+    .qwenpaw-image {
+      width: var(--chat-preview-image-width) !important;
+      max-width: 100% !important;
+      height: auto !important;
+      max-height: var(--chat-preview-image-max-height) !important;
+      margin: 8px 0;
+      cursor: zoom-in;
+      img {
+        display: block;
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto;
+        max-height: var(--chat-preview-image-max-height) !important;
+        object-fit: contain !important;
+        border-radius: 8px;
+        cursor: zoom-in;
+      }
+    }
+
+    .qwenpaw-image + .qwenpaw-image {
+      margin: 8px 0;
+    }
+  }
 
   :global {
     [class*="chat-anywhere-default-header-right"] {
@@ -99,6 +126,7 @@
   color: rgba(0, 0, 0, 0.45);
   display: -webkit-box;
   overflow: hidden;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }

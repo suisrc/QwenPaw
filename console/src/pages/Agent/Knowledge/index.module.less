@@ -135,10 +135,61 @@
 .drawerHeaderMeta {
   margin-top: 8px;
   display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 8px;
   color: rgba(20, 20, 19, 0.65);
   font-size: 12px;
+}
+
+.metaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.keywordRow {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  align-items: center;
+}
+
+.keywordLabel {
+  color: rgba(20, 20, 19, 0.65);
+  flex: 0 0 auto;
+}
+
+.keywordTagGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.keywordInput {
+  width: 150px;
+  max-width: 100%;
+}
+
+.keywordPreview {
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keywordTagGroup :global(.ant-tag) {
+  margin-inline-end: 0;
+}
+
+.keywordTagGroup :global(.ant-input) {
+  border-radius: 8px;
+}
+
+.placeholderText {
+  color: rgba(20, 20, 19, 0.45);
 }
 
 .drawerContent {

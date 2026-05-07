@@ -9,21 +9,26 @@ import {
   Typography,
   Empty,
   Spin,
+  Upload,
 } from "antd";
 import { CheckOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
+import type { UploadProps } from "antd";
 import type { AgentSummary } from "@/api/types/agents";
 import type { KnowledgeBaseSummary } from "@/api/types/knowledge";
 import type { ProviderInfo } from "@/api/types/provider";
+import { useAppMessage } from "@/hooks/useAppMessage";
 import { getAgentDisplayName } from "@/utils/agentDisplayName";
 import type { PoolSkillSpec } from "@/api/types/skill";
 import { skillApi } from "@/api/modules/skill";
 import { agentsApi } from "@/api/modules/agents";
+import { knowledgeApi } from "@/api/modules/knowledge";
 import { providerApi } from "@/api/modules/provider";
 import { providerIcon } from "../../Models/components/providerIcon";
 import styles from "../index.module.less";
 
 const { Text } = Typography;
+const DEFAULT_AGENT_AVATAR = "/qwenpaw.png";
 
 interface EligibleProvider {
   id: string;
@@ -57,6 +62,7 @@ export function AgentModal({
   onCancel,
 }: AgentModalProps) {
   const { t } = useTranslation();
+  const { message } = useAppMessage();
   const [poolSkills, setPoolSkills] = useState<PoolSkillSpec[]>([]);
   const [installedSkills, setInstalledSkills] = useState<string[]>([]);
   const [loadingSkills, setLoadingSkills] = useState(false);
@@ -64,10 +70,11 @@ export function AgentModal({
   const [loadingKnowledgeBases, setLoadingKnowledgeBases] = useState(false);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [loadingProviders, setLoadingProviders] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState(DEFAULT_AGENT_AVATAR);
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   const selectedProviderId = Form.useWatch("active_model_provider", form);
   const selectedModelId = Form.useWatch("active_model_model", form);
-  const watchedWorkspaceDir = Form.useWatch("workspace_dir", form);
 
   const eligibleProviders: EligibleProvider[] = useMemo(() => {
     return providers
@@ -92,6 +99,12 @@ export function AgentModal({
     const provider = eligibleProviders.find((p) => p.id === selectedProviderId);
     return provider?.models ?? [];
   }, [selectedProviderId, eligibleProviders]);
+
+  useEffect(() => {
+    if (!open) return;
+    const currentAvatar = form.getFieldValue("avatar") || DEFAULT_AGENT_AVATAR;
+    setAvatarPreview(currentAvatar);
+  }, [editingAgent, form, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -167,25 +180,15 @@ export function AgentModal({
       return;
     }
 
-    const workspaceDir = String(watchedWorkspaceDir || "").trim();
-    if (!workspaceDir) {
-      setKnowledgeBases([]);
-      onSelectedKnowledgeIdsChange([]);
-      setLoadingKnowledgeBases(false);
-      return;
-    }
-
     setLoadingKnowledgeBases(true);
-    agentsApi
-      .previewWorkspaceKnowledge(workspaceDir)
+    knowledgeApi
+      .listKnowledgeBases()
       .then((preview) => {
-        setKnowledgeBases(preview.knowledge_bases);
-        onSelectedKnowledgeIdsChange(
-          preview.knowledge_config.items.map((item) => item.id),
-        );
+        setKnowledgeBases(preview.items);
+        onSelectedKnowledgeIdsChange([]);
       })
       .catch((error) => {
-        console.error("Failed to preview workspace knowledge:", error);
+        console.error("Failed to load knowledge bases:", error);
         setKnowledgeBases([]);
         onSelectedKnowledgeIdsChange([]);
       })
@@ -194,7 +197,6 @@ export function AgentModal({
     editingAgent,
     onSelectedKnowledgeIdsChange,
     open,
-    watchedWorkspaceDir,
   ]);
 
   const handleProviderChange = (providerId: string) => {
@@ -258,6 +260,30 @@ export function AgentModal({
     onSelectedKnowledgeIdsChange([]);
   };
 
+  const handleAvatarUpload: NonNullable<UploadProps["customRequest"]> = async (
+    options,
+  ) => {
+    if (!editingAgent) {
+      options.onError?.(new Error("Avatar upload is only available when editing an agent."));
+      return;
+    }
+
+    const file = options.file as File;
+    setAvatarUploading(true);
+    try {
+      const result = await agentsApi.uploadAgentAvatar(editingAgent.id, file);
+      form.setFieldsValue({ avatar: result.avatar });
+      setAvatarPreview(result.avatar);
+      options.onSuccess?.(result, undefined as any);
+      message.success(t("agent.avatarUploadSuccess"));
+    } catch (error: any) {
+      options.onError?.(error);
+      message.error(error.message || t("agent.avatarUploadFailed"));
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
   return (
     <Modal
       title={
@@ -309,6 +335,95 @@ export function AgentModal({
         >
           <Input placeholder={t("agent.namePlaceholder")} />
         </Form.Item>
+        <Form.Item name="avatar" hidden>
+          <Input />
+        </Form.Item>
+        {editingAgent ? (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+              {t("agent.avatar")}
+            </div>
+            <Upload
+              accept="image/png,image/jpeg"
+              showUploadList={false}
+              customRequest={handleAvatarUpload}
+              disabled={avatarUploading}
+            >
+              <button
+                type="button"
+                style={{
+                  all: "unset",
+                  cursor: avatarUploading ? "not-allowed" : "pointer",
+                  display: "inline-flex",
+                }}
+              >
+                <div
+                  style={{
+                    width: 88,
+                    height: 88,
+                    borderRadius: 20,
+                    overflow: "hidden",
+                    border: "1px solid var(--ant-color-border-secondary)",
+                    background: "var(--ant-color-bg-container)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    position: "relative",
+                  }}
+                >
+                  <img
+                    src={avatarPreview}
+                    alt={t("agent.avatar")}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: avatarUploading
+                        ? "rgba(0,0,0,0.35)"
+                        : "rgba(0,0,0,0)",
+                      color: "#fff",
+                      fontSize: 12,
+                      textAlign: "center",
+                      padding: 8,
+                      opacity: avatarUploading ? 1 : 0,
+                      transition: "opacity 0.2s ease",
+                    }}
+                  >
+                    {t("agent.avatarUploading")}
+                  </div>
+                </div>
+              </button>
+            </Upload>
+            <div style={{ marginTop: 8, color: "var(--ant-color-text-tertiary)" }}>
+              {t("agent.avatarEditHint")}
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 8, fontSize: 14, fontWeight: 500 }}>
+              {t("agent.avatar")}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <img
+                src={DEFAULT_AGENT_AVATAR}
+                alt={t("agent.avatar")}
+                style={{ width: 40, height: 40, borderRadius: 12, objectFit: "cover" }}
+              />
+              <div style={{ color: "var(--ant-color-text-tertiary)" }}>
+                {t("agent.avatarCreateHint")}
+              </div>
+            </div>
+          </div>
+        )}
         <Form.Item name="description" label={t("agent.description")}>
           <Input.TextArea
             placeholder={t("agent.descriptionPlaceholder")}

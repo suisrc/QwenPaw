@@ -324,7 +324,11 @@ async def _process_single_block(
         return None
 
     # skip downloading, keep original URL for asset links
-    if (source.get("kind", "") == "asset"):
+    if (source.get("type") == "asset"):
+        message_content[index] = {
+            "type": "text",
+            "text": source.get('url') or "[Error: Invalid asset URL]",
+        }
         return None
 
     # Normalize: when source is "base64" but data is a local path (e.g.
